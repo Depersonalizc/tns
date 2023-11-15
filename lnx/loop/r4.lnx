@@ -1,0 +1,14 @@
+# Auto-generated configuration for r4
+
+interface if0 10.3.0.2/24 127.0.0.1:5007 # to network r1-r4
+neighbor 10.3.0.1 at 127.0.0.1:5006 via if0 # r1
+
+interface if1 10.4.0.1/24 127.0.0.1:5008 # to network r4-r5
+neighbor 10.4.0.2 at 127.0.0.1:5009 via if1 # r5
+
+
+routing rip
+
+# Neighbor routers that should be sent RIP messages
+rip advertise-to 10.3.0.1
+rip advertise-to 10.4.0.2

@@ -1,0 +1,11 @@
+{
+ "h1": {
+  "binary_path": "./vhost"
+ },
+ "h2": {
+  "binary_path": "./vhost"
+ },
+ "r1": {
+  "binary_path": "./vrouter"
+ }
+}

@@ -1,0 +1,11 @@
+# Auto-generated configuration for r1
+
+interface if0 10.0.0.2/24 127.0.0.1:5001 # to network r1-left
+neighbor 10.0.0.1 at 127.0.0.1:5000 via if0 # h1
+
+interface if1 10.1.0.1/24 127.0.0.1:5002 # to network r1-right
+neighbor 10.1.0.2 at 127.0.0.1:5003 via if1 # h2
+
+
+routing rip
+

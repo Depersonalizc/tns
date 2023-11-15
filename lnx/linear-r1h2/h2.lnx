@@ -1,0 +1,8 @@
+# Auto-generated configuration for h2
+
+interface if0 10.1.0.2/24 127.0.0.1:5003 # to network r1-right
+neighbor 10.1.0.1 at 127.0.0.1:5002 via if0 # r1
+
+
+# Default route
+route 0.0.0.0/0 via 10.1.0.1

@@ -1,0 +1,9 @@
+# Auto-generated configuration for h4
+
+interface if0 10.1.0.3/24 127.0.0.1:5005 # to network r1-right
+neighbor 10.1.0.1 at 127.0.0.1:5003 via if0 # r1
+neighbor 10.1.0.2 at 127.0.0.1:5004 via if0 # h3
+
+
+# Default route
+route 0.0.0.0/0 via 10.1.0.1

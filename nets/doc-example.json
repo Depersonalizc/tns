@@ -1,0 +1,48 @@
+{
+    "nodes": [
+        {
+            "name": "r1",
+            "type": "router"
+        },
+        {
+            "name": "r2",
+            "type": "router"
+        },
+        {
+            "name": "h1",
+            "type": "host"
+        },
+        {
+            "name": "h2",
+            "type": "host"
+        },
+        {
+            "name": "h3",
+            "type": "host"
+        }
+    ],
+    "networks": [
+        {
+            "name": "r1-hosts",
+            "links": [
+                "h1",
+                "r1"
+            ]
+        },
+        {
+            "name": "r1-r2",
+            "links": [
+                "r1",
+                "r2"
+            ]
+        },
+        {
+            "name": "r2-hosts",
+            "links": [
+                "r2",
+                "h2",
+                "h3"
+            ]
+        }
+    ]
+}

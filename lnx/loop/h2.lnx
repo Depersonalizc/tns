@@ -1,0 +1,8 @@
+# Auto-generated configuration for h2
+
+interface if0 10.6.0.2/24 127.0.0.1:5013 # to network r3-hosts
+neighbor 10.6.0.1 at 127.0.0.1:5012 via if0 # r3
+
+
+# Default route
+route 0.0.0.0/0 via 10.6.0.1

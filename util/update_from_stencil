@@ -1,0 +1,19 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+REPO_DIR=$(realpath "${SCRIPT_DIR}"/..)
+
+STENCIL_REPO=http://github.com/brown-csci1680/ipstack-template
+
+main() {
+    git remote rm stencil || true
+    git remote add stencil "$STENCIL_REPO"
+
+    git config pull.rebase false
+    git pull stencil main --allow-unrelated-histories -s ort -Xtheirs --no-edit
+}
+
+
+main $@

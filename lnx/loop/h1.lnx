@@ -1,0 +1,8 @@
+# Auto-generated configuration for h1
+
+interface if0 10.0.0.1/24 127.0.0.1:5000 # to network r1-hosts
+neighbor 10.0.0.2 at 127.0.0.1:5001 via if0 # r1
+
+
+# Default route
+route 0.0.0.0/0 via 10.0.0.2

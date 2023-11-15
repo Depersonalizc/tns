@@ -1,0 +1,44 @@
+{
+    "nodes": [
+	{
+	    "name": "r1",
+	    "type": "router"
+	},
+	{
+	    "name": "h1",
+	    "type": "host"
+	},
+	{
+	    "name": "h2",
+	    "type": "host"
+	},
+	{
+	    "name": "h3",
+	    "type": "host"
+	},
+	{
+	    "name": "h4",
+	    "type": "host"
+	}
+    ],
+    "networks": [
+	{
+	    "name": "r1-left",
+	    "advertise-routes-from": [],
+	    "links": [
+		"h1",
+		"h2",
+		"r1"
+	    ]
+	},
+	{
+	    "name": "r1-right",
+	    "advertise-routes-from": [],
+	    "links": [
+		"r1",
+		"h3",
+		"h4"
+	    ]
+	}
+    ]
+}
