@@ -11,62 +11,6 @@ This will build a `libiptcp.so` shared library, and two executables `vhost` and 
 
 # TCP
 
-## Performance Measurement
-#### Our version of vhost + reference version of vrouter + 0% drop rate
-Sending a 2MB file from our version of vhost and reference version of vrouter, the time it took to send the entire file is approximately **1.23 seconds**. (In Wireshark the timestamp for the first SYN packet from sender to receiver is *0.00 seconds* while the timestamp for the last ACK packet from receiver to sender is about *1.23 seconds*.) See `captures/build-2mb-new.pcapng`.
-
-#### Reference version of vhost and vrouter + 0% drop rate
-Sending a 2MB file from reference version of vhost and vrouter, the time it took to send the entire file is approximately **0.16 seconds**. (In Wireshark, the timestamp for the first SYN packet from sender to receiver is *0.00 seconds* while the timestamp for the last ACK packet from the sender is about *0.16 seconds*.) See `captures/reference-2mb-new.pcapng`.
-
-## Packet capture
-Please see `build-1mb.pcapng` in the `captures` folder. 
-
-The 3-way handshake: 1,2,3  
-- Correct sequence and acknowledge numbers
-    - SYN: seq = 0, window = 65535
-    - SYN+ACK: seq = 0, ack = 1, window = 65535
-    - ACK: seq = 1, ack = 1, window = 65535
-- Happening at the beginning of the connection before starting to send actual data
-- Checksum correct
-
-One example segment sent and acknowledged: 5,33
-- Correct sequence and acknowledge numbers
-    - segment sent: seq = 1361, ack = 1, window = 65535, Len = 1360
-    - ACK: seq = 1, ack = 1361, window = 64175
-- ACK happened after the segment is sent
-- Checksum correct
-
-One segment that is retransmitted: 26,144
-- Correct sequence and acknowledge numbers
-    - original segment: seq = 29921, ack = 1, window = 65535
-    - retransmitted segment: seq = 29921, ack = 1, window = 65535
-- Same payload data
-- Checksum correct
-
-Connection teardown: 2235,2236,2237,2238
-- Correct sequence and acknowledge numbers
-    - FIN: seq = 996003, window = 65535
-    - ACK: seq = 1, ack = 996004, window = 65534
-    - FIN: seq = 1, window = 65534
-    - ACK: seq = 996004, ack = 2, window = 65534
-- Happening at the end of the connection, after sending a file
-- Sender sends FIN, gets ACK; receiver then sends FIN, gets ACK
-- Checksum correct
-
-## RTT
-The RTT is under 1 millisecond. 
-
-## Known Bugs
-1. When sending a 100MB file, after sending 50MB, the receiver's buffer gets filled up and connection is lost.  
-
-2. Interop between reference host and our host: reference host sends and expects to receive FIN+ACK instead of FIN during the 4-way handshake while ours sends and expects to receive FIN. So reference host, as a receiver, is not closed properly when our version's host and the reference's host interoperate.
-
-3. We did not handle simultaneous open and simultaneous close of connections. 
-
-4. We did not flush the retransmission queue before sending FIN.
-
-5. When one host does `a 9999` and the other host does `sf`, when zero-window probing is happening and the receiver closes the socket, the socket (in FIN_WAIT_1 state) gets ACK with the wrong sequence number (1 more than expected).
-
 ## System Design
 The socket APIs are defined in `tcp_stack.hpp`, including vConnect, vListen, vSend, vRecv and vClose. `tcp_stack.hpp` also has a tcpProtocolHandler which finds the corresponding socket and calls the event handler of the listen or normal socket.  
 
@@ -86,6 +30,12 @@ The `states` namespace defines the structs for all the states.
 
 The `TcpStack` class defines a series of event handler functions which handles receiving a packet of certain type when the host is in certain state. Events are transitions between state and the transitions are defined in this class, including the three-way handshake and the four-way handshake. 
 
+## Known Bugs
+1. Sending large files (>100 MB) with packet losses is unstable and connection may be lost prematurely.
+
+2. Simultaneous open and close of connections are not handled.
+
+3. The retransmission queue is not flushed before sending FIN.
 
 # IP
 
