@@ -48,7 +48,15 @@ public:
         STATIC,
     };
 
-    friend std::ostream& operator<< (std::ostream& os, EntryType entryType);
+    friend std::ostream& operator<< (std::ostream& os, EntryType entryType)
+    {
+        switch (entryType) {
+            case EntryType::LOCAL  : return os << "L";
+            case EntryType::RIP    : return os << "R";
+            case EntryType::STATIC : return os << "S";
+            default                : return os << "?";
+        };
+    }
 
     struct Entry {
         EntryType type;                      // EntryType::LOCAL, ::RIP, ::STATIC
@@ -112,11 +120,46 @@ public:
     // Remove RIP routes that have been expired for RIP_EXPIRATION_TIME
     // Return the removed entries as having infinite cost for triggered update
     // Also remove RIP routes with infinite cost (poisoned routes) but don't send triggered updates for them
-    constexpr RipMessage removeStaleRipEntries_(auto expirationTime);
+    constexpr RipMessage removeStaleRipEntries_(auto expirationTime)
+    {
+        RipMessage::Entries expiredEntries;
+        RipMessage::OptionalAddresses learnedFrom;
+
+        const auto now = std::chrono::steady_clock::now();
+        std::unique_lock lock(mutex_);
+        for (auto it = entries_.begin(); it != entries_.end(); ) {
+            if (it->type == EntryType::RIP) {
+                if (it->metric == RipMessage::INFINITY) {
+                    // Remove entry with infinite cost
+                    *it = entries_.back();
+                    entries_.pop_back();
+                }
+                else if (now - it->lastRefresh > expirationTime) {
+                    // Triggered update
+                    expiredEntries.emplace_back(
+                        RipMessage::INFINITY, it->addr.getAddrHost(), it->mask
+                    );
+                    learnedFrom.emplace_back(std::nullopt);
+                    // Remove expired entry
+                    *it = entries_.back();
+                    entries_.pop_back();
+                }
+                else {
+                    it++;
+                }
+            } else {
+                it++;
+            }
+        }
+
+        return RipMessage::makeResponse(std::move(expiredEntries), std::move(learnedFrom));
+    }
 
 
 private:
-    static std::unique_ptr<RoutingTable> makeRoutingTable(NetworkNode &node);
+    static std::unique_ptr<RoutingTable> makeRoutingTable(NetworkNode &node) {
+        return std::make_unique<RoutingTable>(node, CtorToken{});
+    }
 
 private:
     NetworkNode &node_;

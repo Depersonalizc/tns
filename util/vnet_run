@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+# vnet_run:  Run a virtual IP network in a tmux session
+
+import sys
+import json
+import pathlib
+import argparse
+import subprocess
+
+from dataclasses import dataclass
+
+NODES_FILE_NAME = "nodes.json"
+SESSION_PREFIX = "vnet"
+START_SHELL = "/bin/bash"
+
+DEVICE_TYPE_ROUTER = "router"
+DEVICE_TYPE_HOST = "host"
+
+VHOST_BINARY_NAME = "vhost"
+VROUTER_BINARY_NAME = "vrouter"
+
+VERBOSE_MODE = False
+
+
+# Simple wrapper for running a shell command
+def do_run(cmd, check=True, shell=True):
+    global VERBOSE_MODE
+
+    if VERBOSE_MODE:
+        print("Executing:  {}".format(" ".join(cmd) if isinstance(cmd, list) else cmd))
+
+    proc = subprocess.run(cmd, shell=shell, text=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    if check and proc.returncode != 0:
+        do_exit(f"Command exited with {proc.returncode}:  {proc.stdout}")
+
+    output = proc.stdout
+    return output
+
+
+def check_bin_exists(bin_name):
+    bin_path = pathlib.Path(bin_name)
+
+    if not bin_path.exists():
+        print(f"Could not find binary:  {bin_path}, exiting")
+        sys.exit(1)
+
+
+def load_json(input_file):
+    with open(input_file, "r") as fd:
+        json_data = json.load(fd)
+        return json_data
+
+
+def write_json(d, target_file):
+    with open(target_file, "w") as fd:
+        json.dump(d, fd, indent=True, sort_keys=True)
+
+
+def kill_open_sessions():
+    vnet_sessions = do_run("""tmux list-sessions 2>/dev/null | grep "vnet-" | awk '{ print $1; }' | sed 's/\://g'""")
+    sessions = vnet_sessions.split(" ")
+    for session in sessions:
+        print(f"Killing session {session}")
+        do_run(f"tmux kill-session -t {session}", check=False)
+
+
+def do_exit(message):
+    print(message)
+    sys.exit(1)
+
+
+# Run info for each node
+@dataclass
+class NodeInfo:
+    binary_path: str
+    extra_args: str = ""
+
+    @classmethod
+    def from_dict(cls, d):
+        return NodeInfo(**d)
+
+
+# This class abstracts out fetching per-node configurations,
+# whether the info was specified with --host/--router/devices.json
+# or directly with --bin-config
+class BinManager():
+
+    def __init__(self, device_map: dict[str,NodeInfo]):
+        self.device_map = device_map
+
+    # Generic per-binary lookup function
+    def get_info(self, node_name: str) -> NodeInfo:
+        if node_name not in self.device_map:
+            raise ValueError(f"Node {node_name} not found in device map!")
+
+        dev = self.device_map[node_name]
+        return dev
+
+    # Load binary info directly from binaries.json
+    @classmethod
+    def from_bin_config(cls, bin_config_file: str):
+        config_data = load_json(bin_config_file)
+
+        device_map = {str(k): NodeInfo.from_dict(v) for k, v in config_data.items()}
+
+        return cls(device_map)
+
+    # Load binary info from a combination of:  devices.json, --host, --router
+    @classmethod
+    def from_nodes_file(cls, nodes_file, host_bin: str, router_bin: str):
+        device_map: dict[str, NodeInfo] = {}
+
+        nodes_data = load_json(nodes_file)
+
+        for _name, _type in nodes_data.items():
+            assert (_type == DEVICE_TYPE_HOST) or (_type == DEVICE_TYPE_ROUTER)
+
+            # Create metadata for this node based on the device type
+            device = NodeInfo(
+                binary_path=router_bin if _type == DEVICE_TYPE_ROUTER else host_bin,
+            )
+            device_map[_name] = device
+
+        return cls(device_map)
+
+
+def main(input_args):
+    global VERBOSE_MODE
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--router", type=str, default="", help="Path to vrouter binary")
+    parser.add_argument("--host", type=str, default="", help="Path to vhost binary")
+    parser.add_argument("--bin-dir", type=str, default=".",
+                        help="Path to directory with vhost/vrouter binaries")
+    parser.add_argument("--bin-config", type=str, default="",
+                        help="Run nodes using binaries.json  Overrides  --host and --router")
+    parser.add_argument("--clean", action="store_true",
+                        help="Terminate any open virtual network sessions before starting")
+    parser.add_argument("lnx_dir", type=str, help="Directory with lnx files")
+    parser.add_argument("extra_args", nargs="*",
+                        help="Extra arguments to add when executing each node", default="")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Print commands as they are run")
+
+    args = parser.parse_args(input_args)
+
+    if args.verbose:
+        VERBOSE_MODE = True
+
+    if args.clean:
+        kill_open_sessions()
+
+    lnx_path = pathlib.Path(args.lnx_dir)
+    if not lnx_path.exists():
+        do_exit(f"Could not find net directory {lnx_path}, aborting")
+
+    lnx_files = [f for f in lnx_path.glob("*.lnx")]
+    if len(lnx_files) == 0:
+        do_exit(f"No lnx files found in {lnx_path}")
+
+    bin_info = None
+    if args.bin_config:
+        bin_info = BinManager.from_bin_config(args.bin_config)
+    else:
+        if (args.router != "") or (args.host != ""):
+            if args.router == "" or args.host == "":
+                do_exit("Must specify host and router binaries with --bin-dir or (--host and --router)")
+
+            router_bin = pathlib.Path(args.router).resolve()
+            host_bin = pathlib.Path(args.host).resolve()
+        else:
+            host_bin = pathlib.Path(args.bin_dir).resolve() / VHOST_BINARY_NAME
+            router_bin = pathlib.Path(args.bin_dir).resolve() / VROUTER_BINARY_NAME
+
+        check_bin_exists(router_bin)
+        check_bin_exists(host_bin)
+
+        nodes_file = lnx_path / NODES_FILE_NAME
+        if not nodes_file.exists():
+            do_exit(f"Could not find nodes file at {nodes_file}, aborting.  If you are missing this, generate the network again.")
+
+        bin_info = BinManager.from_nodes_file(nodes_file, host_bin, router_bin)
+
+    network_name = lnx_path.stem
+    session_name = "{}-{}".format(SESSION_PREFIX, network_name)
+
+    lnx_first = lnx_files[0]
+    lnx_rest = lnx_files[1:]
+
+    _extra_args_str = " ".join(args.extra_args)
+
+    # Generate the command to run in each session
+    # Run each pane as the node + a shell after so that user can press
+    # Ctrl+C and get a shell, rather than killing the pane
+    def _cmd(node_name, lnx_file):
+        node_bin = bin_info.get_info(node_name)  # Lookup from bin manager
+        cmd = f"{node_bin.binary_path} --config {lnx_file} {node_bin.extra_args} {_extra_args_str}; {START_SHELL}"
+        return cmd
+
+    # Create the session with the first node
+    first_name = lnx_first.stem
+    do_run([
+        "tmux","new-session",
+        "-s", session_name,
+        "-d", _cmd(first_name, lnx_first)
+    ], shell=False)
+    do_run(f"tmux select-pane -T {first_name}")
+
+    # Set session options
+    do_run('tmux set-option -s pane-border-status top')
+    do_run('tmux set-option -s pane-border-format "#{pane_index}: #{pane_title}"')
+
+    for lnx_file in lnx_rest:
+        node_name = lnx_file.stem
+        do_run([
+            "tmux", "split-window",
+            _cmd(node_name, lnx_file)
+        ], shell=False)
+
+        do_run(f"tmux select-pane -T {node_name}")
+
+        # Even out the layout (use tiled to accommodate the maximum
+	# number of panes)
+        do_run(f"tmux select-layout tiled")
+
+    # Finally, attach to the session
+    do_run(f"tmux attach-session -t {session_name}")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

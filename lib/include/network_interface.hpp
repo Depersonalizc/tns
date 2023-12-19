@@ -52,11 +52,11 @@ public:
      */
     void sendDatagram(const ip::Datagram &datagram, const ip::Ipv4Address &nextHop) const;
 
-    void  turnOn();
-    void turnOff();
+    void  turnOn() { isUp_ =  true; std::cout << "Interface " << name_ << " is up\n";   };
+    void turnOff() { isUp_ = false; std::cout << "Interface " << name_ << " is down\n"; };
 
-    bool  isOn() const;
-    bool isOff() const;
+    bool  isOn() const { return isUp_; }
+    bool isOff() const { return !isUp_; }
 
 private:
     // NetworkInterface objects can be constructed only by NetworkNode

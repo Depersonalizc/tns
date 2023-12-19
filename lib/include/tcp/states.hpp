@@ -2,8 +2,10 @@
 
 #include "ip/address.hpp"
 #include "tcp/session_tuple.hpp"
-#include "util/tl/expected.hpp"
+#include "tcp/socket_error.hpp"
 #include "util/defines.hpp"
+#include "util/periodic_thread.hpp"
+#include "util/tl/expected.hpp"
 
 #include <iostream>
 #include <variant>
@@ -12,6 +14,8 @@
 #include <mutex>
 #include <condition_variable>
 #include <span>
+#include <optional>
+#include <experimental/memory>
 
 /**
  * TCP Connection States and Events for the FSM
@@ -44,16 +48,86 @@ struct Listen {
 
 struct SynSent {
     static constexpr std::string_view name{"SYN_SENT"};
-    static constexpr auto TIMEOUT = std::chrono::seconds{10};  // timeout after 5 seconds
 
-    mutable bool recvedSynAck = false;
-    std::unique_ptr<std::condition_variable> cv;
-    std::unique_ptr<std::mutex> mtx;
+    // mutable std::optional<SocketError> error = std::nullopt;
+    // mutable bool cvNotified = false;
+    // std::shared_ptr<std::condition_variable> cv;
+    // std::shared_ptr<std::mutex> mtx;
 
-    SynSent();
+    struct SynAckResult {
+        std::optional<SocketError> error = std::nullopt;
+        bool notified = false;
+        std::condition_variable cv;
+        std::mutex mtx;
 
-    auto waitForSynAck() const;
-    void onSynAck() const;
+        void onError(SocketError err)
+        {
+            {
+                std::lock_guard<std::mutex> lk(mtx);
+                error = err;
+                notified = true;
+            }
+            cv.notify_one();
+        }
+
+        void onSynAck()
+        {
+            {
+                std::lock_guard<std::mutex> lk(mtx);
+                notified = true;
+            }
+            cv.notify_one();
+        }
+
+        auto waitForSynAck()
+        {
+            std::unique_lock<std::mutex> lk(mtx);
+            // The protocol handler will eventually call onSynAck() when it receives a valid SYN-ACK
+            cv.wait(lk, [this] { return notified; });  // Wait indefinitely, until notified
+            return error;
+        }
+    };
+    std::experimental::observer_ptr<SynAckResult> result_;
+
+    SynSent(SynAckResult &result) : result_{&result} {}
+
+    ~SynSent()
+    {
+        if (result_) {
+            result_->notified = true;
+            result_->cv.notify_all();
+        }
+    }
+
+    SynSent(SynSent&& other) : result_{std::exchange(other.result_, nullptr)} {}
+
+    SynSent& operator=(SynSent&& other)
+    {
+        if (this != &other)
+            result_ = std::exchange(other.result_, nullptr);
+        return *this;
+    }
+
+    void onError(SocketError err) const
+    {
+        if (result_)
+            result_->onError(err);
+    }
+
+    void onSynAck() const
+    {
+        if (result_)
+            result_->onSynAck();
+    }
+
+    // auto waitForSynAck() const
+    // {
+    //     std::unique_lock<std::mutex> lk(result_->mtx);
+    //     // The protocol handler will eventually call onSynAck() when it receives a valid SYN-ACK
+    //     result_->cv.wait(lk, [this] { return result_->mtx; });  // Wait indefinitely, until notified
+    //     return result_->error;
+    // }
+
 };
 
 struct SynReceived {
@@ -64,8 +138,6 @@ struct SynReceived {
 struct Established {
     static constexpr std::string_view name{"ESTABLISHED"};
 
-    // MAYBE?
-    std::thread senderThread;
 };
 
 struct FinWait1 {
@@ -76,13 +148,12 @@ struct FinWait1 {
 struct FinWait2 {
     static constexpr std::string_view name{"FIN_WAIT_2"};
 
+
 };
 
 struct CloseWait {
     static constexpr std::string_view name{"CLOSE_WAIT"};
 
-    // Moved from Established
-    std::thread senderThread;
 };
 
 struct Closing {
@@ -98,6 +169,15 @@ struct LastAck {
 struct TimeWait {
     static constexpr std::string_view name{"TIME_WAIT"};
 
+    std::chrono::steady_clock::time_point time;
+
+    TimeWait() : time{std::chrono::steady_clock::now()} {}
+
+    bool isExpired() const noexcept
+    {
+        using namespace std::chrono;
+        return steady_clock::now() - time > 10s;
+    }
 };
 
 using Variant = std::variant<Closed, Listen, SynSent, SynReceived, Established, 
@@ -114,7 +194,13 @@ struct Close {
 struct GetSyn {
     SessionTuple session;  // Session tuple from swapping that of the SYN packet
     uint32_t clientISN;    // Initial sequence number, Host byte order
-    uint16_t clientWDN;    // Window size, Host byte order
+    uint16_t clientWND;    // Window size, Host byte order
+};
+
+struct GetSynAck {
+    uint32_t serverISN;    // Initial sequence number, Host byte order
+    uint32_t ackNum;
+    uint16_t serverWND;    // Window size, Host byte order
 };
 
 struct GetAck {
@@ -124,17 +210,18 @@ struct GetAck {
     PayloadView payload;
 };
 
-struct GetSynAck {
-    uint32_t serverISN;    // Initial sequence number, Host byte order
-    uint32_t ackNum;
-    uint16_t serverWDN;    // Window size, Host byte order
+struct GetFin {
+    uint32_t seqNum;
+    uint16_t wndSize;      // Host byte order
 };
 
-struct GetRst {
-    // ip::Ipv4Address from;  // From where?
+struct GetFinAck {
+    uint32_t seqNum;
+    uint32_t ackNum;       // Host byte order
+    uint16_t wndSize;      // Host byte order
 };
 
-using Variant = std::variant<Close, GetSyn, GetRst, GetAck, GetSynAck>;
+using Variant = std::variant<Close, GetSyn, GetSynAck, GetAck, GetFin, GetFinAck>;
 
 tl::expected<Variant, std::string> fromPacket(const Packet &packet, const SessionTuple &session);
 
@@ -144,10 +231,10 @@ using State = states::Variant;
 using Event = events::Variant;
 
 // Utility
-inline std::ostream& operator<<(std::ostream& os, const State& state);
-
-// // Forward declared visitors for Event & State
-// struct EventHandler;
+inline std::ostream& operator<<(std::ostream& os, const State& state) {
+    os << std::visit([](const auto& s) { return s.name; }, state);
+    return os;
+}
 
 } // namespace tcp
 } // namespace tns

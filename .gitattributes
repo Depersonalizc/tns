@@ -1,0 +1,5 @@
+# Force unix newlines on all platforms
+util/update_from_stencil text eol=lf
+util/vnet_generate text eol=lf
+util/vnet_run text eol=lf
+*.sh text eol=lf

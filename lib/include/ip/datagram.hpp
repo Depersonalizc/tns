@@ -25,10 +25,19 @@ class Datagram {
 public:
     Datagram() noexcept = default;
     Datagram(const Ipv4Address &srcAddr, const Ipv4Address &destAddr, PayloadPtr payload, ip::Protocol protocol);  // Used when sending
-    Datagram(iphdr hdr, PayloadPtr payload) noexcept;
-    Datagram(Datagram &&other) noexcept;
+    Datagram(iphdr hdr, PayloadPtr payload) noexcept 
+        : ipHeader_(hdr), payload_(std::move(payload)) {}
+    Datagram(Datagram &&other) noexcept 
+        : ipHeader_(std::exchange(other.ipHeader_, {})), payload_(std::move(other.payload_)) {}
 
-    Datagram &operator=(Datagram &&other) noexcept;
+    Datagram &operator=(Datagram &&other) noexcept 
+    {
+        if (this != &other) {
+            ipHeader_ = std::exchange(other.ipHeader_, {});
+            payload_ = std::move(other.payload_);
+        }
+        return *this;
+    }
 
     ~Datagram() = default;
 
@@ -36,19 +45,20 @@ public:
 
     // uint8_t decrementTTL() { return --ipHeader_.ttl; }
     // bool checksumOk() const { return ipHeader_.check == computeChecksum_(); }  // Assume options are zero
-    void updateChecksum();
+    void updateChecksum() { ipHeader_.check = computeChecksum_(); }
 
-    const std::uint8_t &getTTL() const noexcept;
-    Ipv4Address getDstAddr() const noexcept;
-    Ipv4Address getSrcAddr() const noexcept;
-    ip::Protocol getProtocol() const noexcept;
-    std::uint16_t getTotalLength() const noexcept;
-    PayloadView getPayloadView() const noexcept;
+    const std::uint8_t &getTTL() const noexcept { return ipHeader_.ttl; }
+    Ipv4Address getDstAddr() const noexcept { return Ipv4Address(ipHeader_.daddr); }
+    Ipv4Address getSrcAddr() const noexcept { return Ipv4Address(ipHeader_.saddr); }
+    ip::Protocol getProtocol() const noexcept { return ip::Protocol(ipHeader_.protocol); }
+    std::uint16_t getTotalLength() const noexcept { return ntohs(ipHeader_.tot_len); }
+
+    PayloadView getPayloadView() const noexcept { return payload_ ? PayloadView(*payload_) : PayloadView{}; }
 
     static constexpr std::size_t MAX_DATAGRAM_SIZE = 1400;
 
 private:
-    std::uint16_t computeChecksum_() const;
+    std::uint16_t computeChecksum_() const { return util::ipv4Checksum(reinterpret_cast<const std::uint16_t *>(&ipHeader_)); }
 
     iphdr ipHeader_;  // 20-byte IP header naked of options
     PayloadPtr payload_;  // payload of variable length

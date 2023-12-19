@@ -10,7 +10,18 @@ namespace ip {
 
 void testProtocolHandler(DatagramPtr datagram)
 {
-    ::THROW_NO_IMPL();
+    std::stringstream ss;
+
+    const auto payload = datagram->getPayloadView();
+    std::string_view message = {reinterpret_cast<const char *>(payload.data()), payload.size()};
+
+    ss << "Received test packet: "
+    << "Src: "  << datagram->getSrcAddr().toStringAddr()  << ", "
+    << "Dst: "  << datagram->getDstAddr().toStringAddr() << ", "
+    << "TTL: "  << static_cast<int>(datagram->getTTL())   << ", "
+    << "Data: " << message << "\n";
+
+    std::cout << ss.str();
 }
 
 } // namespace ip

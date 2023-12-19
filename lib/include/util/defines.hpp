@@ -5,11 +5,9 @@
 #include <memory>
 #include <functional>
 
-inline auto THROW_NO_IMPL = 
-    []() { throw std::runtime_error{"This is a placeholder repo and does not contain implementation."
-                                    "Please contact me if you want to take a look at the codebase!"}; };
-
 namespace tns {
+
+template<class... Ts> struct overload : Ts... { using Ts::operator()...; };
 
 class NetworkInterface;
 
@@ -19,7 +17,6 @@ namespace util::threading {
 
 namespace ip {
     class Datagram;
-    // enum class Protocol : std::uint8_t;
 } // namespace ip
 
 using Payload = std::vector<std::byte>;
@@ -31,6 +28,7 @@ using NetworkInterfaces = std::vector<NetworkInterface>;
 using NetworkInterfaceIter = NetworkInterfaces::iterator;
 
 using PeriodicThreadPtr = std::unique_ptr<util::threading::PeriodicThread>;
+// using PeriodicThreadPtr = std::unique_ptr<util::threading::PeriodicThread, util::threading::PeriodicThreadDeleter>;
 
 using DatagramSharedPtr = std::shared_ptr<ip::Datagram>;
 using DatagramPtr = std::unique_ptr<ip::Datagram>;

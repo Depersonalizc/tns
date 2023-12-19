@@ -12,7 +12,7 @@ namespace ip {
 
 class Ipv4Address;
 
-// Virtual IPv4 address defined in a lnx file
+// Routing Information Protocol (RIP) packet
 class RipMessage {
 public:
     static constexpr std::uint32_t INFINITY = 16;
@@ -31,17 +31,21 @@ public:
 
     using OptionalAddresses = std::vector<std::optional<Ipv4Address>>;
 
-    static RipMessage makeRequest();
-    static RipMessage makeResponse(Entries entries, OptionalAddresses learnedFrom);
+    static RipMessage makeRequest() {
+        return RipMessage(Command::REQUEST, {}, {});
+    }
+    static RipMessage makeResponse(Entries entries, OptionalAddresses learnedFrom) {
+        return RipMessage(Command::RESPONSE, std::move(entries), std::move(learnedFrom));
+    }
 
     RipMessage(PayloadView payload);  // recv, convert to host byte order when receiving
-    ~RipMessage();
+    ~RipMessage() { /* std::cout << "RipMessage::~RipMessage() : DONE!\n"; */ }
 
-    Command getCommand() const;
-    std::uint16_t getNumEntries() const;
-    const Entries &getEntries() const;
-    const OptionalAddresses &getLearnedFrom() const;
-    std::size_t payloadSize() const;
+    Command getCommand() const { return command_; }
+    std::uint16_t getNumEntries() const { return numEntries_; }
+    const Entries &getEntries() const { return entries_; }
+    const OptionalAddresses &getLearnedFrom() const { return learnedFrom_; }
+    std::size_t payloadSize() const { return sizeof(command_) + sizeof(numEntries_) + entries_.size() * sizeof(Entry); }
 
 private:
     RipMessage(Command command, Entries entries, OptionalAddresses learnedFrom);  // send, convert to network byte order when sending
